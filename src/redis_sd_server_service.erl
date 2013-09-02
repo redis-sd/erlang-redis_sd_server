@@ -20,7 +20,7 @@
 -export([init/1, handle_event/3, handle_sync_event/4, handle_info/3,
 	terminate/3, code_change/4]).
 
--export([connect/2, announce/2]).
+-export([connect/2, authorize/2, announce/2]).
 
 %%%===================================================================
 %%% API functions
@@ -84,10 +84,12 @@ handle_sync_event(_Event, _From, _StateName, Service) ->
 	{stop, badmsg, Service}.
 
 %% @private
-handle_info({timeout, ARef, announce}, announce, Service=#service{aref=ARef}) ->
-	announce(timeout, Service#service{aref=undefined});
 handle_info({timeout, BRef, connect}, _StateName, Service=#service{bref=BRef}) ->
 	connect(timeout, Service#service{bref=undefined});
+handle_info({timeout, ZRef, authorize}, authorize, Service=#service{zref=ZRef}) ->
+	authorize(timeout, Service#service{zref=undefined});
+handle_info({timeout, ARef, announce}, announce, Service=#service{aref=ARef}) ->
+	announce(timeout, Service#service{aref=undefined});
 handle_info({redis_error, Client, {Error, Reason}}, StateName, Service=#service{redis_cli=Client, name=Name}) ->
 	error_logger:warning_msg(
 		"** ~p ~p received redis_error in ~p/~p~n"
@@ -135,19 +137,32 @@ connect(timeout, Service=#service{redis_opts={Transport, Args}, backoff=Backoff}
 	case erlang:apply(hierdis_async, ConnectFun, Args) of
 		{ok, Client} ->
 			{_Start, Backoff2} = backoff:succeed(Backoff),
-			ARef = start_announce(initial),
-			{next_state, announce, Service#service{redis_cli=Client, backoff=Backoff2, aref=ARef}};
+			ZRef = start_authorize(initial),
+			{next_state, authorize, Service#service{redis_cli=Client, backoff=Backoff2, zref=ZRef}};
 		{error, _ConnectError} ->
-			BRef = start_connect(Backoff),
+			BRef = start_connect(Service),
 			{_Delay, Backoff2} = backoff:fail(Backoff),
 			{next_state, connect, Service#service{backoff=Backoff2, bref=BRef}}
+	end.
+
+%% @private
+authorize(timeout, Service=#service{redis_auth=undefined}) ->
+	ARef = start_announce(initial),
+	{next_state, announce, Service#service{aref=ARef}};
+authorize(timeout, Service=#service{redis_auth=Password}) when Password =/= undefined ->
+	case redis_auth(Password, Service) of
+		ok ->
+			ARef = start_announce(initial),
+			{next_state, announce, Service#service{aref=ARef}};
+		{error, Reason} ->
+			{stop, {error, Reason}, Service}
 	end.
 
 %% @private
 announce(timeout, Service) ->
 	case redis_sd_server_dns:refresh(Service) of
 		{ok, Data, Service2} ->
-			ok = send(Data, Service2),
+			ok = redis_announce(Data, Service2),
 			ARef = start_announce(Service2),
 			{next_state, announce, Service2#service{aref=ARef}};
 		RefreshError ->
@@ -164,17 +179,33 @@ announce(timeout, Service) ->
 %%%-------------------------------------------------------------------
 
 %% @private
-send(Data, Service=#service{redis_cli=Client, redis_ns=Namespace, ttl=TTL}) ->
+redis_auth(Password, #service{redis_cli=Client, cmd_auth=AUTH}) ->
+	Command = [AUTH, Password],
+	try hierdis_async:command(Client, Command) of
+		{ok, _} ->
+			ok;
+		{error, Reason} ->
+			{error, Reason}
+	catch
+		Class:Reason ->
+			error_logger:error_msg(
+				"** ~p ~p terminating in ~p/~p~n"
+				"   for the reason ~p:~p~n** Stacktrace: ~p~n~n",
+				[?MODULE, self(), redis_auth, 2, Class, Reason, erlang:get_stacktrace()]),
+			erlang:error(Reason)
+	end.
+
+%% @private
+redis_announce(Data, Service=#service{redis_cli=Client, redis_ns=Namespace, ttl=TTL, cmd_del=DEL, cmd_publish=PUBLISH, cmd_setex=SETEX}) ->
 	redis_sd_server_event:service_announce(Data, Service),
-	Key = [Namespace, "PTR:", redis_sd:nsreverse(Service#service.servkey)],
 	Channel = [Namespace, "PTR:", redis_sd:nsreverse(Service#service.typekey)],
 	SetOrDel = case TTL of
 		0 ->
-			["DEL", Key];
+			[DEL, Channel];
 		_ when is_integer(TTL) ->
-			["SETEX", Key, integer_to_list(TTL), Data]
+			[SETEX, Channel, integer_to_list(TTL), Data]
 	end,
-	Transaction = [SetOrDel, ["PUBLISH", Channel, Data]],
+	Transaction = [SetOrDel, [PUBLISH, Channel, Data]],
 	try hierdis_async:transaction(Client, Transaction) of
 		{ok, _} ->
 			ok;
@@ -203,6 +234,29 @@ start_announce(N) when is_integer(N) ->
 	erlang:start_timer(N, self(), announce).
 
 %% @private
+stop_announce(#service{aref=undefined}) ->
+	ok;
+stop_announce(#service{aref=ARef}) when is_reference(ARef) ->
+	catch erlang:cancel_timer(ARef),
+	ok.
+
+%% @private
+start_authorize(initial) ->
+	start_authorize(0);
+start_authorize(Service=#service{}) ->
+	ok = stop_authorize(Service),
+	start_authorize(0);
+start_authorize(N) when is_integer(N) ->
+	erlang:start_timer(N, self(), authorize).
+
+%% @private
+stop_authorize(#service{zref=undefined}) ->
+	ok;
+stop_authorize(#service{zref=ZRef}) when is_reference(ZRef) ->
+	catch erlang:cancel_timer(ZRef),
+	ok.
+
+%% @private
 start_connect(initial) ->
 	start_connect(0);
 start_connect(Service=#service{backoff=Backoff}) ->
@@ -210,13 +264,6 @@ start_connect(Service=#service{backoff=Backoff}) ->
 	backoff:fire(Backoff);
 start_connect(N) when is_integer(N) ->
 	erlang:start_timer(N, self(), connect).
-
-%% @private
-stop_announce(#service{aref=undefined}) ->
-	ok;
-stop_announce(#service{aref=ARef}) when is_reference(ARef) ->
-	catch erlang:cancel_timer(ARef),
-	ok.
 
 %% @private
 stop_connect(#service{bref=undefined}) ->

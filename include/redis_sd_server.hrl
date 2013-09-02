@@ -21,14 +21,22 @@
 
 	%% Redis Options
 	redis_opts = {tcp, ["127.0.0.1", 6379]} :: {tcp | unix, [string() | integer() | timeout()]},
-	redis_ns   = <<>>						:: binary() | string(),
+	redis_auth = undefined                  :: undefined | iodata(),
+	redis_ns   = ""                         :: iodata(),
 	redis_cli  = undefined                  :: undefined | port(),
+
+	%% Redis Commands
+	cmd_auth         = "AUTH"         :: iodata(),
+	cmd_del          = "DEL"          :: iodata(),
+	cmd_publish      = "PUBLISH"      :: iodata(),
+	cmd_setex        = "SETEX"        :: iodata(),
 
 	%% Reconnect Options
 	min_wait = 1         :: integer(), % seconds
 	max_wait = 120       :: integer(), % seconds
 	backoff  = undefined :: undefined | backoff:backoff(),
 	bref     = undefined :: undefined | reference(),
+	zref     = undefined :: undefined | reference(),
 	aref     = undefined :: undefined | reference(),
 	lock     = undefined :: undefined | reference(),
 

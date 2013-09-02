@@ -62,8 +62,8 @@ delete_service(Name) ->
 %%%===================================================================
 
 init([]) ->
-	ManagerSpec = {redis_sd_server_manager,
-		{gen_event, start_link, [{local, redis_sd_server_manager}]},
+	ManagerSpec = {redis_sd_server_event:manager(),
+		{gen_event, start_link, [{local, redis_sd_server_event:manager()}]},
 		permanent, 5000, worker, [gen_event]},
 	ServerSpec = {redis_sd_server,
 		{redis_sd_server, start_link, []},

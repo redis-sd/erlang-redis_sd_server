@@ -29,7 +29,7 @@
 %% @doc Manually start redis_sd_server and all dependencies.
 -spec manual_start() -> ok.
 manual_start() ->
-	require([
+	redis_sd:require([
 		hierdis,
 		redis_sd_server
 	]).
@@ -55,7 +55,7 @@ start_link() ->
 
 %% @private
 init([]) ->
-	ok = redis_sd_server_event:add_handler(redis_sd_server_event_handler, ?SERVER),
+	ok = redis_sd_server_event:add_handler(redis_sd_event_handler, self()),
 	{ok, undefined}.
 
 %% @private
@@ -68,14 +68,10 @@ handle_cast(_Request, State) ->
 	{noreply, State}.
 
 %% @private
-handle_info({'$redis_sd_service_init', _Service}, State) ->
-	{noreply, State};
-handle_info({'$redis_sd_service_connect', _Service}, State) ->
-	{noreply, State};
-handle_info({'$redis_sd_service_announce', _Data, _Service}, State) ->
-	{noreply, State};
-handle_info(_Info={'$redis_sd_service_terminate', normal, #service{name=Name}}, State) ->
+handle_info({'$redis_sd', {service, terminate, normal, #service{name=Name}}}, State) ->
 	ok = redis_sd_server:delete_service(Name),
+	{noreply, State};
+handle_info({'$redis_sd', _Event}, State) ->
 	{noreply, State};
 handle_info(Info, State) ->
 	error_logger:error_msg(
@@ -95,15 +91,3 @@ code_change(_OldVsn, State, _Extra) ->
 %%%-------------------------------------------------------------------
 %%% Internal functions
 %%%-------------------------------------------------------------------
-
-%% @doc Start the given applications if they were not already started.
-%% @private
--spec require(list(module())) -> ok.
-require([]) ->
-	ok;
-require([App|Tail]) ->
-	case application:start(App) of
-		ok -> ok;
-		{error, {already_started, App}} -> ok
-	end,
-	require(Tail).

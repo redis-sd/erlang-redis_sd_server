@@ -15,23 +15,35 @@
 -define(MANAGER, redis_sd_server_manager).
 
 %% API
--export([add_handler/2, service_init/1, service_connect/1, service_announce/2, service_terminate/2]).
+-export([manager/0, add_handler/2]).
+-export([service_init/1, service_connect/1, service_announce/2, service_terminate/2]).
 
 %%%===================================================================
 %%% API functions
 %%%===================================================================
 
+manager() ->
+	redis_sd_server_manager.
+
 add_handler(Handler, Pid) ->
-	gen_event:add_handler(?MANAGER, Handler, Pid).
+	gen_event:add_handler(manager(), Handler, Pid).
 
 service_init(Service=#service{}) ->
-	gen_event:notify(?MANAGER, {service, init, Service}).
+	notify({service, init, Service}).
 
 service_connect(Service=#service{}) ->
-	gen_event:notify(?MANAGER, {service, connect, Service}).
+	notify({service, connect, Service}).
 
 service_announce(Data, Service=#service{}) ->
-	gen_event:notify(?MANAGER, {service, announce, Data, Service}).
+	notify({service, announce, Data, Service}).
 
 service_terminate(Reason, Service=#service{}) ->
-	gen_event:notify(?MANAGER, {service, terminate, Reason, Service}).
+	notify({service, terminate, Reason, Service}).
+
+%%%-------------------------------------------------------------------
+%%% Internal functions
+%%%-------------------------------------------------------------------
+
+%% @private
+notify(Message) ->
+	gen_event:notify(manager(), Message).
