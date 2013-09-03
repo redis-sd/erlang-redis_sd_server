@@ -14,7 +14,7 @@
 -include("redis_sd_server.hrl").
 
 %% API
--export([start_link/1, get/1, lock/1, set/3, graceful_shutdown/1]).
+-export([start_link/1, graceful_shutdown/1]).
 
 %% gen_fsm callbacks
 -export([init/1, handle_event/3, handle_sync_event/4, handle_info/3,
@@ -29,19 +29,6 @@
 %% @private
 start_link(Service=#service{name=Name}) ->
 	gen_fsm:start_link({local, Name}, ?MODULE, Service, []).
-
-%% @doc Get the Service record.
-get(Name) ->
-	gen_fsm:sync_send_all_state_event(Name, get).
-
-%% @doc Lock the Service record with the intention of calling set/3.
-%% Previous locks will be overwritten.
-lock(Name) ->
-	gen_fsm:sync_send_all_state_event(Name, lock).
-
-%% @doc Update the Service record.
-set(Name, Lock, Service=#service{}) when is_reference(Lock) ->
-	gen_fsm:sync_send_all_state_event(Name, {set, Lock, Service}).
 
 %% @doc Gracefully shutdown the service.
 graceful_shutdown(Name) ->
@@ -63,21 +50,6 @@ handle_event(_Event, _StateName, Service) ->
 	{stop, badmsg, Service}.
 
 %% @private
-handle_sync_event(get, _From, StateName, Service) ->
-	Reply = {ok, Service#service{lock=undefined}},
-	{reply, Reply, StateName, Service};
-handle_sync_event(lock, _From, StateName, Service) ->
-	Lock = erlang:make_ref(),
-	Reply = {ok, Lock, Service},
-	{reply, Reply, StateName, Service#service{lock=Lock}};
-handle_sync_event({set, Lock, NewService=#service{}}, _From, StateName, Service) when is_reference(Lock) ->
-	case Service#service.lock of
-		Lock ->
-			Service2 = NewService#service{lock=undefined},
-			{reply, {ok, Service2}, StateName, Service2};
-		_ ->
-			{reply, {error, invalid_lock}, StateName, Service}
-	end;
 handle_sync_event(graceful_shutdown, _From, _StateName, Service) ->
 	{stop, normal, ok, Service};
 handle_sync_event(_Event, _From, _StateName, Service) ->
@@ -97,9 +69,10 @@ handle_info({redis_error, Client, {Error, Reason}}, StateName, Service=#service{
 		[?MODULE, Name, handle_info, 3, Error, Reason]),
 	{next_state, StateName, Service};
 handle_info({redis_closed, Client}, _StateName, Service=#service{redis_cli=Client}) ->
+	ok = stop_authorize(Service),
 	ok = stop_announce(Service),
 	ok = hierdis_async:close(Client),
-	connect(timeout, Service#service{redis_cli=undefined, aref=undefined});
+	connect(timeout, Service#service{redis_cli=undefined, zref=undefined, aref=undefined});
 handle_info(Info, StateName, Service=#service{name=Name}) ->
 	error_logger:error_msg(
 		"** ~p ~p unhandled info in ~p/~p~n"
@@ -161,10 +134,10 @@ authorize(timeout, Service=#service{redis_auth=Password}) when Password =/= unde
 %% @private
 announce(timeout, Service) ->
 	case redis_sd_server_dns:refresh(Service) of
-		{ok, Data, Service2} ->
-			ok = redis_announce(Data, Service2),
-			ARef = start_announce(Service2),
-			{next_state, announce, Service2#service{aref=ARef}};
+		{ok, Data, Resolved} ->
+			ok = redis_announce(Data, Resolved, Service),
+			ARef = start_announce(Service),
+			{next_state, announce, Service#service{aref=ARef}};
 		RefreshError ->
 			error_logger:warning_msg(
 				"** ~p ~p non-fatal error in ~p/~p~n"
@@ -196,9 +169,9 @@ redis_auth(Password, #service{redis_cli=Client, cmd_auth=AUTH}) ->
 	end.
 
 %% @private
-redis_announce(Data, Service=#service{redis_cli=Client, redis_ns=Namespace, ttl=TTL, cmd_del=DEL, cmd_publish=PUBLISH, cmd_setex=SETEX}) ->
+redis_announce(Data, #service{ttl=TTL, servkey=ServKey}, Service=#service{redis_cli=Client, redis_ns=Namespace, cmd_del=DEL, cmd_publish=PUBLISH, cmd_setex=SETEX}) ->
 	redis_sd_server_event:service_announce(Data, Service),
-	Channel = [Namespace, "PTR:", redis_sd:nsreverse(Service#service.typekey)],
+	Channel = [Namespace, "PTR:", redis_sd:nsreverse(ServKey)],
 	SetOrDel = case TTL of
 		0 ->
 			[DEL, Channel];
@@ -213,14 +186,14 @@ redis_announce(Data, Service=#service{redis_cli=Client, redis_ns=Namespace, ttl=
 			error_logger:warning_msg(
 				"** ~p ~p non-fatal error in ~p/~p~n"
 				"   for the reason ~p:~p~n",
-				[?MODULE, self(), send, 2, error, Reason]),
+				[?MODULE, self(), redis_announce, 2, error, Reason]),
 			ok
 	catch
 		Class:Reason ->
 			error_logger:error_msg(
 				"** ~p ~p terminating in ~p/~p~n"
 				"   for the reason ~p:~p~n** Stacktrace: ~p~n~n",
-				[?MODULE, self(), send, 2, Class, Reason, erlang:get_stacktrace()]),
+				[?MODULE, self(), redis_announce, 2, Class, Reason, erlang:get_stacktrace()]),
 			erlang:error(Reason)
 	end.
 

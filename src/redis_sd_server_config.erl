@@ -27,13 +27,18 @@
 list_to_service(S) ->
 	Default = #service{},
 	#service{
-		name    = req(name, S),
-		service = opt(service, S, Default#service.service),
-		type    = opt(type, S, Default#service.type),
-		domain  = opt(domain, S, Default#service.domain),
-		host    = opt(host, S, Default#service.host),
-		port    = opt(port, S, Default#service.port),
-		ttl     = opt(ttl, S, Default#service.ttl),
+		name     = req(name, S),
+		service  = opt(service, S, Default#service.service),
+		type     = opt(type, S, Default#service.type),
+		domain   = opt(domain, S, Default#service.domain),
+		hostname = opt(hostname, S, Default#service.hostname),
+		ttl      = opt(ttl, S, Default#service.ttl),
+
+		%% SRV
+		host = opt(host, S, Default#service.host),
+		port = opt(port, S, Default#service.port),
+
+		%% TXT
 		txtdata = opt(txtdata, S, Default#service.txtdata),
 
 		%% Redis Options

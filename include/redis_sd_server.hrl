@@ -10,14 +10,19 @@
 %%%-------------------------------------------------------------------
 
 -record(service, {
-	name    = undefined :: undefined | atom(),
-	service = "generic" :: string(),
-	type    = "tcp"     :: string(),
-	domain  = "local"   :: string(),
-	host    = undefined :: undefined | inet:hostname(),
-	port    = undefined :: undefined | inet:port_number(),
-	ttl     = 120       :: integer(), % seconds
-	txtdata = []        :: [{iodata(), iodata()}],
+	name     = undefined :: undefined | atom(),
+	service  = "generic" :: iodata() | function(),
+	type     = "tcp"     :: iodata() | function(), 
+	domain   = "local"   :: iodata() | function(),
+	hostname = undefined :: undefined | inet:hostname() | inet:ip_address() | function(), % PTR domain._type._service.hostname
+	ttl      = 120       :: integer() | function(), % seconds
+
+	%% SRV
+	host = undefined :: undefined | inet:hostname() | inet:ip_address() | function(), % SRV 0 0 port host
+	port = undefined :: undefined | inet:port_number() | function(),
+
+	%% TXT
+	txtdata = [] :: [{iodata() | function(), iodata() | function()}] | function(),
 
 	%% Redis Options
 	redis_opts = {tcp, ["127.0.0.1", 6379]} :: {tcp | unix, [string() | integer() | timeout()]},
@@ -38,10 +43,8 @@
 	bref     = undefined :: undefined | reference(),
 	zref     = undefined :: undefined | reference(),
 	aref     = undefined :: undefined | reference(),
-	lock     = undefined :: undefined | reference(),
 
 	%% Sync & Announce Cache
-	hostname = undefined :: undefined | iodata(),
 	hostkey  = undefined :: undefined | iodata(),
 	servkey  = undefined :: undefined | iodata(),
 	typekey  = undefined :: undefined | iodata()

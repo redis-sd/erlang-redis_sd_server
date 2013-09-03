@@ -2,7 +2,7 @@
 %% vim: ts=4 sw=4 ft=erlang noet
 
 ExtraDeps = [
-  {redis_test_server, ".*", {git, "git://github.com/potatosalad/redis_test_server.git", {tag, "0.0.2"}}}
+	{redis_test_server, ".*", {git, "git://github.com/potatosalad/redis_test_server.git", {tag, "0.0.2"}}}
 ],
 ErlOpts = [
 	{d, 'TEST'},
