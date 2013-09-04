@@ -169,9 +169,9 @@ redis_auth(Password, #service{redis_cli=Client, cmd_auth=AUTH}) ->
 	end.
 
 %% @private
-redis_announce(Data, #service{ttl=TTL, servkey=ServKey}, Service=#service{redis_cli=Client, redis_ns=Namespace, cmd_del=DEL, cmd_publish=PUBLISH, cmd_setex=SETEX}) ->
+redis_announce(Data, #service{ttl=TTL, instkey=InstKey}, Service=#service{redis_cli=Client, redis_ns=Namespace, cmd_del=DEL, cmd_publish=PUBLISH, cmd_setex=SETEX}) ->
 	redis_sd_server_event:service_announce(Data, Service),
-	Channel = [Namespace, "PTR:", redis_sd:nsreverse(ServKey)],
+	Channel = [Namespace, "PTR:", redis_sd:nsreverse(InstKey)],
 	SetOrDel = case TTL of
 		0 ->
 			[DEL, Channel];

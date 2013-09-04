@@ -25,20 +25,20 @@ refresh(Service=#service{}) ->
 		{ok, Resolved} ->
 			data(Resolved);
 		ResolveError ->
-			{error, ResolveError}
+			ResolveError
 	end.
 
 %% @doc Resolves any dynamic function values in the Service.
 resolve(Service=#service{}) ->
-	Keys = [service, type, domain, hostname, ttl, host, port, txtdata,
-		hostkey, servkey, typekey],
+	Keys = [service, type, domain, hostname, instance, ttl, host, port,
+		txtdata, hostkey, instkey, servkey, typekey],
 	s(Keys, Service).
 
 %% @doc Resolves a specific key in the Service.
 resolve(Keys, Service=#service{}) when is_list(Keys) ->
 	s(Keys, Service);
 resolve(Key, Service=#service{}) when is_atom(Key) ->
-	{ok, setval(Key, Service)}.
+	s([Key], Service).
 
 %% @doc Creates a new dns_rec record based on the Service.
 record(Service=#service{}) ->
@@ -67,20 +67,49 @@ data(Service=#service{}) ->
 s([], Service) ->
 	{ok, Service};
 s([Key | Keys], Service) ->
-	s(Keys, setval(Key, Service)).
+	case setval(Key, Service) of
+		Service2=#service{} ->
+			s(Keys, Service2);
+		Error ->
+			Error
+	end.
 
 %% @private
 setval(service, S=#service{service=V}) ->
-	S#service{service=val(V)};
+	V2 = val(V),
+	case redis_sd:is_label(V2) of
+		true ->
+			S#service{service=V2};
+		false ->
+			{error, {invalid_label, {service, V2}}}
+	end;
 setval(type, S=#service{type=V}) ->
-	S#service{type=val(V)};
+	V2 = val(V),
+	case redis_sd:is_label(V2) of
+		true ->
+			S#service{type=V2};
+		false ->
+			{error, {invalid_label, {type, V2}}}
+	end;
 setval(domain, S=#service{domain=V}) ->
-	S#service{domain=val(V)};
+	V2 = val(V),
+	D = redis_sd:nssplit(V2),
+	case lists:all(fun(B) -> redis_sd:is_label(binary_to_list(B)) end, D) of
+		true ->
+			S#service{domain=D};
+		false ->
+			{error, {invalid_label, {domain, V2}}}
+	end;
 setval(hostname, S=#service{hostname=undefined}) ->
 	{ok, H} = inet:gethostname(),
 	S#service{hostname=H};
 setval(hostname, S=#service{hostname=V}) ->
 	S#service{hostname=val(V)};
+setval(instance, S=#service{instance=undefined}) ->
+	I = integer_to_list(erlang:phash2(node())),
+	S#service{instance=I};
+setval(instance, S=#service{instance=V}) ->
+	S#service{instance=val(V)};
 setval(ttl, S=#service{ttl=V}) ->
 	S#service{ttl=val(V)};
 setval(host, S=#service{host=undefined}) ->
@@ -93,33 +122,61 @@ setval(port, S=#service{port=V}) ->
 setval(txtdata, S=#service{txtdata=V}) ->
 	S#service{txtdata=val(V)};
 setval(hostkey, S=#service{hostkey=undefined}) ->
-	{ok, S2} = s([host, domain], S),
-	HostKey = iolist_to_binary([
-		redis_sd:urlencode(S2#service.host),
-		$., redis_sd:urlencode(S2#service.domain)
-	]),
-	S2#service{hostkey=HostKey};
+	case s([host, domain], S) of
+		{ok, S2} ->
+			HostKey = iolist_to_binary([
+				S2#service.host,
+				$., S2#service.domain
+			]),
+			S2#service{hostkey=HostKey};
+		Error ->
+			Error
+	end;
 setval(hostkey, S=#service{hostkey=V}) ->
 	S#service{hostkey=val(V)};
+setval(instkey, S=#service{instkey=undefined}) ->
+	case s([instance, hostname, service, type, domain], S) of
+		{ok, S2} ->
+			InstKey = iolist_to_binary([
+				redis_sd:urlencode(S2#service.instance),
+				$., S2#service.hostname,
+				$., $_, S2#service.service,
+				$., $_, S2#service.type,
+				$., S2#service.domain
+			]),
+			S2#service{instkey=InstKey};
+		Error ->
+			Error
+	end;
+setval(instkey, S=#service{instkey=V}) ->
+	S#service{instkey=val(V)};
 setval(servkey, S=#service{servkey=undefined}) ->
-	{ok, S2} = s([hostname, service, type, domain], S),
-	ServKey = iolist_to_binary([
-		redis_sd:urlencode(S2#service.hostname),
-		$., $_, redis_sd:urlencode(S2#service.service),
-		$., $_, redis_sd:urlencode(S2#service.type),
-		$., redis_sd:urlencode(S2#service.domain)
-	]),
-	S2#service{servkey=ServKey};
+	case s([hostname, service, type, domain], S) of
+		{ok, S2} ->
+			ServKey = iolist_to_binary([
+				S2#service.hostname,
+				$., $_, S2#service.service,
+				$., $_, S2#service.type,
+				$., S2#service.domain
+			]),
+			S2#service{servkey=ServKey};
+		Error ->
+			Error
+	end;
 setval(servkey, S=#service{servkey=V}) ->
 	S#service{servkey=val(V)};
 setval(typekey, S=#service{typekey=undefined}) ->
-	{ok, S2} = s([service, type, domain], S),
-	TypeKey = iolist_to_binary([
-		$_, redis_sd:urlencode(S2#service.service),
-		$., $_, redis_sd:urlencode(S2#service.type),
-		$., redis_sd:urlencode(S2#service.domain)
-	]),
-	S2#service{typekey=TypeKey};
+	case s([service, type, domain], S) of
+		{ok, S2} ->
+			TypeKey = iolist_to_binary([
+				$_, S2#service.service,
+				$., $_, S2#service.type,
+				$., S2#service.domain
+			]),
+			S2#service{typekey=TypeKey};
+		Error ->
+			Error
+	end;
 setval(typekey, S=#service{typekey=V}) ->
 	S#service{typekey=val(V)}.
 
@@ -156,17 +213,17 @@ arlist(Service) ->
 	[service(Service), text(Service)].
 
 %% @private
-answer(#service{servkey=ServKey, typekey=TypeKey, ttl=TTL}) ->
+answer(#service{instkey=InstKey, typekey=TypeKey, ttl=TTL}) ->
 	inet_dns:make_rr([
 		{type, ptr},
 		{domain, redis_sd:any_to_string(TypeKey)},
 		{class, in},
 		{ttl, TTL},
-		{data, redis_sd:any_to_string(ServKey)}
+		{data, redis_sd:any_to_string(InstKey)}
 	]).
 
 %% @private
-service(Service=#service{servkey=ServKey, hostkey=HostKey, ttl=TTL}) ->
+service(Service=#service{instkey=InstKey, hostkey=HostKey, ttl=TTL}) ->
 	Port = case Service#service.port of
 		undefined ->
 			0;
@@ -175,17 +232,17 @@ service(Service=#service{servkey=ServKey, hostkey=HostKey, ttl=TTL}) ->
 	end,
 	inet_dns:make_rr([
 		{type, srv},
-		{domain, redis_sd:any_to_string(ServKey)},
+		{domain, redis_sd:any_to_string(InstKey)},
 		{class, in},
 		{ttl, TTL},
 		{data, {0, 0, Port, redis_sd:any_to_string(HostKey)}}
 	]).
 
 %% @private
-text(#service{servkey=ServKey, txtdata=TXTData, ttl=TTL}) ->
+text(#service{instkey=InstKey, txtdata=TXTData, ttl=TTL}) ->
 	inet_dns:make_rr([
 		{type, txt},
-		{domain, redis_sd:any_to_string(ServKey)},
+		{domain, redis_sd:any_to_string(InstKey)},
 		{class, in},
 		{ttl, TTL},
 		{data, text_data(TXTData, [])}

@@ -15,6 +15,7 @@
 	type     = "tcp"     :: iodata() | function(), 
 	domain   = "local"   :: iodata() | function(),
 	hostname = undefined :: undefined | inet:hostname() | inet:ip_address() | function(), % PTR domain._type._service.hostname
+	instance = undefined :: undefined | iodata() | function(), % PTR domain._type._service.hostname.instance
 	ttl      = 120       :: integer() | function(), % seconds
 
 	%% SRV
@@ -45,7 +46,8 @@
 	aref     = undefined :: undefined | reference(),
 
 	%% Sync & Announce Cache
-	hostkey  = undefined :: undefined | iodata(),
-	servkey  = undefined :: undefined | iodata(),
-	typekey  = undefined :: undefined | iodata()
+	hostkey = undefined :: undefined | iodata(),
+	instkey = undefined :: undefined | iodata(),
+	servkey = undefined :: undefined | iodata(),
+	typekey = undefined :: undefined | iodata()
 }).

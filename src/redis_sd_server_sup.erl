@@ -33,8 +33,13 @@ start_link() ->
 %% public API for this functionality is {@link redis_sd_server:new_service/1}.
 new_service(ServiceConfig) ->
 	NewService = redis_sd_server_config:list_to_service(ServiceConfig),
-	Spec = service_sup_spec(NewService),
-	supervisor:start_child(?MODULE, Spec).
+	case redis_sd_server_dns:resolve([service, type, domain], NewService) of
+		{ok, _} ->
+			Spec = service_sup_spec(NewService),
+			supervisor:start_child(?MODULE, Spec);
+		ResolveError ->
+			ResolveError
+	end.
 
 %% @doc Gracefully shutdown the named service.
 rm_service(Name) ->

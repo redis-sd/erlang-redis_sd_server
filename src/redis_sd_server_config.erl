@@ -32,6 +32,7 @@ list_to_service(S) ->
 		type     = opt(type, S, Default#service.type),
 		domain   = opt(domain, S, Default#service.domain),
 		hostname = opt(hostname, S, Default#service.hostname),
+		instance = opt(instance, S, Default#service.instance),
 		ttl      = opt(ttl, S, Default#service.ttl),
 
 		%% SRV
