@@ -25,3 +25,4 @@ rel/redis_sd_server.tar.bz2
 /log
 /rel/vars/dev*_vars.config
 /.redis_sd_server.plt
+/.rebar-test
