@@ -28,23 +28,31 @@ list_to_service(S) ->
 	Default = #service{},
 	#service{
 		name     = req(name, S),
-		service  = opt(service, S, Default#service.service),
-		type     = opt(type, S, Default#service.type),
-		domain   = opt(domain, S, Default#service.domain),
-		hostname = opt(hostname, S, Default#service.hostname),
-		instance = opt(instance, S, Default#service.instance),
-		ttl      = opt(ttl, S, Default#service.ttl),
+		domain   = req(domain, S),
+		type     = req(type, S),
+		service  = req(service, S),
+		instance = req(instance, S),
+		ttl      = req(ttl, S),
 
 		%% SRV
-		host = opt(host, S, Default#service.host),
-		port = opt(port, S, Default#service.port),
+		priority = req(priority, S),
+		weight   = req(weight, S),
+		port     = req(port, S),
+		target   = req(target, S),
 
 		%% TXT
 		txtdata = opt(txtdata, S, Default#service.txtdata),
 
 		%% Redis Options
 		redis_opts = opt(redis_opts, S, Default#service.redis_opts),
+		redis_auth = opt(redis_auth, S, Default#service.redis_auth),
 		redis_ns   = opt(redis_ns, S, Default#service.redis_ns),
+
+		%% Redis Commands
+		cmd_auth    = opt(cmd_auth, S, Default#service.cmd_auth),
+		cmd_del     = opt(cmd_del, S, Default#service.cmd_del),
+		cmd_publish = opt(cmd_publish, S, Default#service.cmd_publish),
+		cmd_setex   = opt(cmd_setex, S, Default#service.cmd_setex),
 
 		%% Reconnect Options
 		min_wait = opt(min_wait, S, Default#service.min_wait),

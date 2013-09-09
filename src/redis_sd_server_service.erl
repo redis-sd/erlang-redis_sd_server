@@ -134,10 +134,10 @@ authorize(timeout, Service=#service{redis_auth=Password}) when Password =/= unde
 %% @private
 announce(timeout, Service) ->
 	case redis_sd_server_dns:refresh(Service) of
-		{ok, Data, Resolved} ->
-			ok = redis_announce(Data, Resolved, Service),
-			ARef = start_announce(Service),
-			{next_state, announce, Service#service{aref=ARef}};
+		{ok, Data, Service2} ->
+			ok = redis_announce(Data, Service2),
+			ARef = start_announce(Service2),
+			{next_state, announce, Service2#service{aref=ARef}};
 		RefreshError ->
 			error_logger:warning_msg(
 				"** ~p ~p non-fatal error in ~p/~p~n"
@@ -169,9 +169,9 @@ redis_auth(Password, #service{redis_cli=Client, cmd_auth=AUTH}) ->
 	end.
 
 %% @private
-redis_announce(Data, #service{ttl=TTL, instkey=InstKey}, Service=#service{redis_cli=Client, redis_ns=Namespace, cmd_del=DEL, cmd_publish=PUBLISH, cmd_setex=SETEX}) ->
+redis_announce(Data, Service=#service{key=KEY, obj=#dns_sd{ttl=TTL}, redis_cli=Client, redis_ns=Namespace, cmd_del=DEL, cmd_publish=PUBLISH, cmd_setex=SETEX}) ->
 	redis_sd_server_event:service_announce(Data, Service),
-	Channel = [Namespace, "PTR:", redis_sd:nsreverse(InstKey)],
+	Channel = [Namespace, "KEY:", KEY],
 	SetOrDel = case TTL of
 		0 ->
 			[DEL, Channel];
@@ -200,7 +200,7 @@ redis_announce(Data, #service{ttl=TTL, instkey=InstKey}, Service=#service{redis_
 %% @private
 start_announce(initial) ->
 	start_announce(crypto:rand_uniform(500, 1500));
-start_announce(Service=#service{ttl=TTL}) ->
+start_announce(Service=#service{obj=#dns_sd{ttl=TTL}}) ->
 	ok = stop_announce(Service),
 	start_announce(crypto:rand_uniform(TTL * 500, TTL * 900));
 start_announce(N) when is_integer(N) ->

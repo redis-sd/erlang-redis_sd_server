@@ -9,21 +9,29 @@
 %%% Created :  29 Aug 2013 by Andrew Bennett <andrew@pagodabox.com>
 %%%-------------------------------------------------------------------
 
+-include_lib("redis_sd_spec/include/redis_sd.hrl").
+
+-type service_fun(Type) ::
+	fun((redis_sd:obj()) -> Type).
+-type service_val(Type) ::
+	Type | service_fun(Type).
+
 -record(service, {
 	name     = undefined :: undefined | atom(),
-	service  = "generic" :: iodata() | function(),
-	type     = "tcp"     :: iodata() | function(), 
-	domain   = "local"   :: iodata() | function(),
-	hostname = undefined :: undefined | inet:hostname() | inet:ip_address() | function(), % PTR domain._type._service.hostname
-	instance = undefined :: undefined | iodata() | function(), % PTR domain._type._service.hostname.instance
-	ttl      = 120       :: integer() | function(), % seconds
+	domain   = undefined :: undefined | service_val(iodata()),
+	type     = undefined :: undefined | service_val(iodata()),
+	service  = undefined :: undefined | service_val(iodata()),
+	instance = undefined :: undefined | service_val(iodata()), % instance._service._type.domain
+	ttl      = undefined :: undefined | service_val(non_neg_integer()), % seconds
 
 	%% SRV
-	host = undefined :: undefined | inet:hostname() | inet:ip_address() | function(), % SRV 0 0 port host
-	port = undefined :: undefined | inet:port_number() | function(),
+	priority = undefined :: undefined | service_val(non_neg_integer()),
+	weight   = undefined :: undefined | service_val(non_neg_integer()),
+	port     = undefined :: undefined | service_val(inet:port_number()),
+	target   = undefined :: undefined | service_val(inet:hostname() | inet:ip_address()),
 
 	%% TXT
-	txtdata = [] :: [{iodata() | function(), iodata() | function()}] | function(),
+	txtdata = [] :: service_val([{service_val(iodata()), service_val(iodata())}]),
 
 	%% Redis Options
 	redis_opts = {tcp, ["127.0.0.1", 6379]} :: {tcp | unix, [string() | integer() | timeout()]},
@@ -45,9 +53,11 @@
 	zref     = undefined :: undefined | reference(),
 	aref     = undefined :: undefined | reference(),
 
-	%% Sync & Announce Cache
-	hostkey = undefined :: undefined | iodata(),
-	instkey = undefined :: undefined | iodata(),
-	servkey = undefined :: undefined | iodata(),
-	typekey = undefined :: undefined | iodata()
+	%% Refresh Cache
+	obj = undefined :: undefined | redis_sd:obj(),
+	ptr = undefined :: undefined | binary(),
+	srv = undefined :: undefined | binary(),
+	key = undefined :: undefined | binary()
 }).
+
+-type service() :: #service{}.
