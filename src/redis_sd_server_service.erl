@@ -39,11 +39,18 @@ graceful_shutdown(Name) ->
 %%%===================================================================
 
 %% @private
-init(Service=#service{min_wait=MinWait, max_wait=MaxWait}) ->
-	redis_sd_server_event:service_init(Service),
-	Backoff = backoff:init(timer:seconds(MinWait), timer:seconds(MaxWait), self(), connect),
-	BRef = start_connect(initial),
-	{ok, connect, Service#service{backoff=Backoff, bref=BRef}}.
+init(Service=#service{name=Name, min_wait=MinWait, max_wait=MaxWait}) ->
+	case redis_sd_server_dns:refresh(Service) of
+		{ok, _Data, Service2=#service{obj=Obj}} ->
+			true = redis_sd_server:set_pid(Name, self()),
+			true = redis_sd_server:set_record(Name, Obj),
+			redis_sd_server_event:service_init(Service2),
+			Backoff = backoff:init(timer:seconds(MinWait), timer:seconds(MaxWait), self(), connect),
+			BRef = start_connect(initial),
+			{ok, connect, Service2#service{backoff=Backoff, bref=BRef}};
+		RefreshError ->
+			{stop, RefreshError}
+	end.
 
 %% @private
 handle_event(_Event, _StateName, Service) ->
@@ -133,18 +140,25 @@ authorize(timeout, Service=#service{redis_auth=Password}) when Password =/= unde
 
 %% @private
 announce(timeout, Service) ->
-	case redis_sd_server_dns:refresh(Service) of
-		{ok, Data, Service2} ->
-			ok = redis_announce(Data, Service2),
-			ARef = start_announce(Service2),
-			{next_state, announce, Service2#service{aref=ARef}};
-		RefreshError ->
+	try
+		case redis_sd_server_dns:refresh(Service) of
+			{ok, Data, Service2=#service{name=Name, obj=Obj}} ->
+				true = redis_sd_server:set_record(Name, Obj),
+				ok = redis_announce(Data, Service2),
+				ARef = start_announce(Service2),
+				{next_state, announce, Service2#service{aref=ARef}};
+			RefreshError ->
+				erlang:error(RefreshError)
+		end
+	catch
+		Class:Reason ->
 			error_logger:warning_msg(
-				"** ~p ~p non-fatal error in ~p/~p~n"
-				"   for the reason ~p:~p~n",
-				[?MODULE, self(), announce, 2, error, RefreshError]),
-			ARef = start_announce(Service),
-			{next_state, announce, Service#service{aref=ARef}}
+				"** ~p ~p terminating in ~p/~p~n"
+				"   for the reason ~p:~p~n"
+				"** Stacktrace: ~p~n~n",
+				[?MODULE, self(), announce, 2, Class, Reason, erlang:get_stacktrace()]),
+			ok = stop_announce(Service),
+			{stop, {Class, Reason}, Service#service{aref=undefined}}
 	end.
 
 %%%-------------------------------------------------------------------
@@ -200,6 +214,9 @@ redis_announce(Data, Service=#service{key=KEY, obj=#dns_sd{ttl=TTL}, redis_cli=C
 %% @private
 start_announce(initial) ->
 	start_announce(crypto:rand_uniform(500, 1500));
+start_announce(Service=#service{obj=#dns_sd{ttl=0}}) ->
+	ok = stop_announce(Service),
+	start_announce(0);
 start_announce(Service=#service{obj=#dns_sd{ttl=TTL}}) ->
 	ok = stop_announce(Service),
 	start_announce(crypto:rand_uniform(TTL * 500, TTL * 900));

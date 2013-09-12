@@ -67,6 +67,7 @@ delete_service(Name) ->
 %%%===================================================================
 
 init([]) ->
+	redis_sd_server = ets:new(redis_sd_server, [ordered_set, public, named_table]),
 	ManagerSpec = {redis_sd_server_event:manager(),
 		{gen_event, start_link, [{local, redis_sd_server_event:manager()}]},
 		permanent, 5000, worker, [gen_event]},
