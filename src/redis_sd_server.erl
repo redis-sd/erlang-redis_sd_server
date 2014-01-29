@@ -110,7 +110,7 @@ handle_cast(_Request, State) ->
 	{noreply, State}.
 
 %% @private
-handle_info({'$redis_sd', {service, terminate, normal, #service{name=Name}}}, State) ->
+handle_info({'$redis_sd', {service, terminate, normal, ?REDIS_SD_SERVICE{name=Name}}}, State) ->
 	ok = redis_sd_server:delete_service(Name),
 	{noreply, State};
 handle_info({'$redis_sd', _Event}, State) ->

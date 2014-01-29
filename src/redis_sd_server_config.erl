@@ -23,7 +23,7 @@
 %%% API functions
 %%%===================================================================
 
--spec list_to_service([{atom(), term()}]) -> #service{}.
+-spec list_to_service([{atom(), term()}]) -> service().
 list_to_service(S) ->
 	Default = #service{},
 	#service{
