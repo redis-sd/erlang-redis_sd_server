@@ -94,7 +94,7 @@ init([]) ->
 %%%-------------------------------------------------------------------
 
 %% @private
-service_sup_spec(Service=#service{name=Name}) ->
+service_sup_spec(Service=?REDIS_SD_SERVICE{name=Name}) ->
 	SupName = service_sup_name(Name),
 	{SupName,
 		{redis_sd_server_service_sup, start_link, [Service]},

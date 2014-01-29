@@ -13,7 +13,7 @@
 -include("redis_sd_server.hrl").
 
 %% API
--export([refresh/1, resolve/1, resolve/2, record/1, data/1]).
+-export([refresh/1, resolve/1, resolve/2]).
 
 %% Internal
 -export([val/2]).
@@ -22,45 +22,26 @@
 %%% API functions
 %%%===================================================================
 
-%% @doc Refreshes
-refresh(Service=#service{}) ->
-	case resolve(Service#service{obj=undefined}) of
-		{ok, Resolved} ->
-			data(Resolved);
+%% @doc Resolves the redis_sd_dns again and also returns the binary form.
+refresh(Service=?REDIS_SD_SERVICE{}) ->
+	case resolve(Service?REDIS_SD_SERVICE{rec=undefined}) of
+		{ok, Resolved=?REDIS_SD_SERVICE{rec=Rec}} ->
+			{ok, redis_sd_dns:to_binary(Rec), Resolved};
 		ResolveError ->
 			ResolveError
 	end.
 
 %% @doc Resolves any dynamic function values in the Service.
-resolve(Service=#service{}) ->
+resolve(Service=?REDIS_SD_SERVICE{}) ->
 	Keys = [domain, type, service, instance, ttl, priority, weight,
 		port, target, txtdata, keys],
 	resolve(Keys, Service).
 
 %% @doc Resolves a specific key in the Service.
-resolve(Keys, Service=#service{}) when is_list(Keys) ->
+resolve(Keys, Service=?REDIS_SD_SERVICE{}) when is_list(Keys) ->
 	s(Keys, Service);
-resolve(Key, Service=#service{}) when is_atom(Key) ->
+resolve(Key, Service=?REDIS_SD_SERVICE{}) when is_atom(Key) ->
 	resolve([Key], Service).
-
-%% @doc Creates a new dns_rec record based on the Service.
-record(Service=#service{}) ->
-	Record = inet_dns:make_msg([
-		{header, header()},
-		{anlist, anlist(Service)},
-		{arlist, arlist(Service)}
-	]),
-	{ok, Record, Service}.
-
-%% @doc Creates and encodes a new dns_rec record based on the Service.
-data(Service=#service{}) ->
-	case record(Service) of
-		{ok, Record, Service2} ->
-			Data = inet_dns:encode(Record),
-			{ok, Data, Service2};
-		RecordError ->
-			{error, RecordError}
-	end.
 
 %%%-------------------------------------------------------------------
 %%% Internal functions
@@ -71,67 +52,67 @@ s([], Service) ->
 	{ok, Service};
 s([Key | Keys], Service) ->
 	case setval(Key, Service) of
-		Service2=#service{} ->
+		Service2=?REDIS_SD_SERVICE{} ->
 			s(Keys, Service2);
 		Error ->
 			Error
 	end.
 
 %% @private
-setval(Key, S=#service{obj=undefined}) ->
-	setval(Key, S#service{obj=#dns_sd{}});
-setval(domain, S=#service{domain=V, obj=Obj}) ->
-	V2 = redis_sd:any_to_binary(val(Obj, V)),
+setval(Key, S=?REDIS_SD_SERVICE{rec=undefined}) ->
+	setval(Key, S?REDIS_SD_SERVICE{rec=?REDIS_SD_DNS{}});
+setval(domain, S=?REDIS_SD_SERVICE{domain=V, rec=Rec}) ->
+	V2 = redis_sd:any_to_binary(val(Rec, V)),
 	D = redis_sd_ns:split(V2),
 	case lists:all(fun(B) -> redis_sd_ns:is_label(B) end, D) of
 		true ->
-			S#service{obj=Obj#dns_sd{domain=V2}};
+			S?REDIS_SD_SERVICE{rec=Rec?REDIS_SD_DNS{domain=V2}};
 		false ->
 			{error, {invalid_label, {domain, V2}}}
 	end;
-setval(type, S=#service{type=V, obj=Obj}) ->
-	V2 = redis_sd:any_to_binary(val(Obj, V)),
+setval(type, S=?REDIS_SD_SERVICE{type=V, rec=Rec}) ->
+	V2 = redis_sd:any_to_binary(val(Rec, V)),
 	case redis_sd_ns:is_label(V2) of
 		true ->
-			S#service{obj=Obj#dns_sd{type=V2}};
+			S?REDIS_SD_SERVICE{rec=Rec?REDIS_SD_DNS{type=V2}};
 		false ->
 			{error, {invalid_label, {type, V2}}}
 	end;
-setval(service, S=#service{service=V, obj=Obj}) ->
-	V2 = redis_sd:any_to_binary(val(Obj, V)),
+setval(service, S=?REDIS_SD_SERVICE{service=V, rec=Rec}) ->
+	V2 = redis_sd:any_to_binary(val(Rec, V)),
 	case redis_sd_ns:is_label(V2) of
 		true ->
-			S#service{obj=Obj#dns_sd{service=V2}};
+			S?REDIS_SD_SERVICE{rec=Rec?REDIS_SD_DNS{service=V2}};
 		false ->
 			{error, {invalid_label, {service, V2}}}
 	end;
-setval(instance, S=#service{instance=V, obj=Obj}) ->
-	V2 = redis_sd:any_to_binary(val(Obj, V)),
-	S#service{obj=Obj#dns_sd{instance=V2}};
-setval(ttl, S=#service{ttl=V, obj=Obj}) ->
-	V2 = val(Obj, V),
-	S#service{obj=Obj#dns_sd{ttl=V2}};
-setval(priority, S=#service{priority=V, obj=Obj}) ->
-	V2 = val(Obj, V),
-	S#service{obj=Obj#dns_sd{priority=V2}};
-setval(weight, S=#service{weight=V, obj=Obj}) ->
-	V2 = val(Obj, V),
-	S#service{obj=Obj#dns_sd{weight=V2}};
-setval(port, S=#service{port=V, obj=Obj}) ->
-	V2 = val(Obj, V),
-	S#service{obj=Obj#dns_sd{port=V2}};
-setval(target, S=#service{target=V, obj=Obj}) ->
-	V2 = redis_sd:any_to_binary(val(Obj, V)),
-	S#service{obj=Obj#dns_sd{target=V2}};
-setval(txtdata, S=#service{txtdata=V, obj=Obj}) ->
-	V2 = val(Obj, V),
-	S#service{obj=Obj#dns_sd{txtdata=V2}};
-setval(keys, S=#service{obj=#dns_sd{domain=Domain, type=Type, service=Service, instance=Instance}}) ->
+setval(instance, S=?REDIS_SD_SERVICE{instance=V, rec=Rec}) ->
+	V2 = redis_sd:any_to_binary(val(rec, V)),
+	S?REDIS_SD_SERVICE{rec=Rec?REDIS_SD_DNS{instance=V2}};
+setval(ttl, S=?REDIS_SD_SERVICE{ttl=V, rec=Rec}) ->
+	V2 = val(Rec, V),
+	S?REDIS_SD_SERVICE{rec=Rec?REDIS_SD_DNS{ttl=V2}};
+setval(priority, S=?REDIS_SD_SERVICE{priority=V, rec=Rec}) ->
+	V2 = val(Rec, V),
+	S?REDIS_SD_SERVICE{rec=Rec?REDIS_SD_DNS{priority=V2}};
+setval(weight, S=?REDIS_SD_SERVICE{weight=V, rec=Rec}) ->
+	V2 = val(Rec, V),
+	S?REDIS_SD_SERVICE{rec=Rec?REDIS_SD_DNS{weight=V2}};
+setval(port, S=?REDIS_SD_SERVICE{port=V, rec=Rec}) ->
+	V2 = val(Rec, V),
+	S?REDIS_SD_SERVICE{rec=Rec?REDIS_SD_DNS{port=V2}};
+setval(target, S=?REDIS_SD_SERVICE{target=V, rec=Rec}) ->
+	V2 = redis_sd:any_to_binary(val(Rec, V)),
+	S?REDIS_SD_SERVICE{rec=Rec?REDIS_SD_DNS{target=V2}};
+setval(txtdata, S=?REDIS_SD_SERVICE{txtdata=TXTData, rec=Rec}) ->
+	V2 = [{val(Rec, K), val(Rec, V)} || {K, V} <- val(Rec, TXTData)],
+	S?REDIS_SD_SERVICE{rec=Rec?REDIS_SD_DNS{txtdata=V2}};
+setval(keys, S=?REDIS_SD_SERVICE{rec=?REDIS_SD_DNS{domain=Domain, type=Type, service=Service, instance=Instance}}) ->
 	Keys = redis_sd:labels_to_keys({Domain, Type, Service, Instance}),
 	PTR = proplists:get_value(ptr, Keys),
 	SRV = proplists:get_value(srv, Keys),
 	KEY = proplists:get_value(key, Keys),
-	S#service{ptr=PTR, srv=SRV, key=KEY}.
+	S?REDIS_SD_SERVICE{ptr=PTR, srv=SRV, key=KEY}.
 
 %% @private
 val(Obj, {Module, Function, Arguments}) when is_atom(Module) andalso is_atom(Function) andalso is_list(Arguments) ->
@@ -144,68 +125,3 @@ val(_Obj, Function) when is_function(Function, 0) ->
 	Function();
 val(_Obj, Val) ->
 	Val.
-
-%% @private
-header() ->
-	inet_dns:make_header([
-		{id, 0},
-		{qr, true},
-		{opcode, 'query'},
-		{aa, true},
-		{tc, false},
-		{rd, false},
-		{ra, false},
-		{pr, false},
-		{rcode, 0}
-	]).
-
-%% @private
-anlist(Service) ->
-	[answer(Service)].
-
-%% @private
-arlist(Service) ->
-	[service(Service), text(Service)].
-
-%% @private
-answer(#service{ptr=PTR, srv=SRV, obj=#dns_sd{ttl=TTL}}) ->
-	inet_dns:make_rr([
-		{type, ptr},
-		{domain, redis_sd:any_to_string(PTR)},
-		{class, in},
-		{ttl, TTL},
-		{data, redis_sd:any_to_string(SRV)}
-	]).
-
-%% @private
-service(#service{srv=SRV, obj=#dns_sd{ttl=TTL, priority=Priority, weight=Weight, port=Port, target=Target}}) ->
-	inet_dns:make_rr([
-		{type, srv},
-		{domain, redis_sd:any_to_string(SRV)},
-		{class, in},
-		{ttl, TTL},
-		{data, {Priority, Weight, Port, redis_sd:any_to_string(Target)}}
-	]).
-
-%% @private
-text(#service{srv=SRV, obj=#dns_sd{ttl=TTL, txtdata=TXTData}}) ->
-	inet_dns:make_rr([
-		{type, txt},
-		{domain, redis_sd:any_to_string(SRV)},
-		{class, in},
-		{ttl, TTL},
-		{data, text_data(TXTData, [])}
-	]).
-
-%% @private
-text_data([], Acc) ->
-	lists:reverse(Acc);
-text_data([{Key, Val} | TXTData], Acc) ->
-	KeyVal = redis_sd:any_to_string([text_data_encode(Key), $=, text_data_encode(Val)]),
-	text_data(TXTData, [KeyVal | Acc]).
-
-%% @private
-text_data_encode(Data) when is_function(Data) ->
-	text_data_encode(Data());
-text_data_encode(Data) ->
-	redis_sd:urlencode(Data).

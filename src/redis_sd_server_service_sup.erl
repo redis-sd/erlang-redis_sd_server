@@ -26,11 +26,11 @@
 %%% API functions
 %%%===================================================================
 
-start_link(Service=#service{}) ->
+start_link(Service=?REDIS_SD_SERVICE{}) ->
 	SupName = service_sup_name(Service),
 	supervisor:start_link({local, SupName}, ?MODULE, Service).
 
-service_sup_name(#service{name=Name}) ->
+service_sup_name(?REDIS_SD_SERVICE{name=Name}) ->
 	list_to_atom("redis_sd_server_" ++ atom_to_list(Name) ++ "_service_sup").
 
 %% @doc Gracefully shutdown the named service.
@@ -46,7 +46,7 @@ graceful_shutdown(Name) ->
 %%% Supervisor callbacks
 %%%===================================================================
 
-init(Service=#service{}) ->
+init(Service=?REDIS_SD_SERVICE{}) ->
 	ServiceSpec = {redis_sd_server_service,
 		{redis_sd_server_service, start_link, [Service]},
 		transient, 2000, worker, [redis_sd_server_service]},

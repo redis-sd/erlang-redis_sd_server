@@ -16,28 +16,35 @@
 
 %% API
 -export([manager/0, add_handler/2]).
--export([service_init/1, service_connect/1, service_announce/2, service_terminate/2]).
+-export([service_init/1, service_enable/1, service_disable/1,
+	service_connect/1, service_announce/2, service_terminate/2]).
 
 %%%===================================================================
 %%% API functions
 %%%===================================================================
 
 manager() ->
-	redis_sd_server_manager.
+	?MANAGER.
 
 add_handler(Handler, Pid) ->
 	gen_event:add_handler(manager(), Handler, Pid).
 
-service_init(Service=#service{}) ->
+service_init(Service=?REDIS_SD_SERVICE{}) ->
 	notify({service, init, Service}).
 
-service_connect(Service=#service{}) ->
+service_enable(Service=?REDIS_SD_SERVICE{}) ->
+	notify({service, enable, Service}).
+
+service_disable(Service=?REDIS_SD_SERVICE{}) ->
+	notify({service, disable, Service}).
+
+service_connect(Service=?REDIS_SD_SERVICE{}) ->
 	notify({service, connect, Service}).
 
-service_announce(Data, Service=#service{}) ->
+service_announce(Data, Service=?REDIS_SD_SERVICE{}) ->
 	notify({service, announce, Data, Service}).
 
-service_terminate(Reason, Service=#service{}) ->
+service_terminate(Reason, Service=?REDIS_SD_SERVICE{}) ->
 	notify({service, terminate, Reason, Service}).
 
 %%%-------------------------------------------------------------------

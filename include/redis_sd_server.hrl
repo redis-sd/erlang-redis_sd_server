@@ -19,6 +19,8 @@
 	Type | redis_sd_service_fun(Type).
 
 -record(redis_sd_service_v1, {
+	enabled = true :: boolean(),
+
 	name     = undefined :: undefined | atom(),
 	domain   = undefined :: undefined | redis_sd_service_val(iodata()),
 	type     = undefined :: undefined | redis_sd_service_val(iodata()),

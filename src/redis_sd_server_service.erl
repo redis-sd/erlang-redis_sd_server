@@ -14,13 +14,11 @@
 -include("redis_sd_server.hrl").
 
 %% API
--export([start_link/1, graceful_shutdown/1]).
+-export([start_link/1, enable/1, disable/1, graceful_shutdown/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	terminate/2, code_change/3]).
-
--export([connect/2, authorize/2, announce/2]).
 
 %%%===================================================================
 %%% API functions
@@ -29,6 +27,14 @@
 %% @private
 start_link(Service=?REDIS_SD_SERVICE{name=Name}) ->
 	gen_server:start_link({local, Name}, ?MODULE, Service, []).
+
+%% @doc Enable announcing of the service.
+enable(Name) ->
+	gen_server:cast(Name, enable).
+
+%% @doc Disable announcing of the service.
+disable(Name) ->
+	gen_server:cast(Name, disable).
 
 %% @doc Gracefully shutdown the service.
 graceful_shutdown(Name) ->
@@ -39,12 +45,19 @@ graceful_shutdown(Name) ->
 %%%===================================================================
 
 %% @private
-init(Service=?REDIS_SD_SERVICE{name=Name, min_wait=MinWait, max_wait=MaxWait}) ->
+init(Service=?REDIS_SD_SERVICE{enabled=Enabled, name=Name, min_wait=MinWait, max_wait=MaxWait}) ->
 	case redis_sd_server_dns:refresh(Service) of
 		{ok, _Data, Service2=?REDIS_SD_SERVICE{rec=Rec}} ->
 			true = redis_sd_server:set_pid(Name, self()),
+			true = redis_sd_server:set_enabled(Name, Enabled),
 			true = redis_sd_server:set_record(Name, Rec),
 			redis_sd_server_event:service_init(Service2),
+			case Enabled of
+				false ->
+					redis_sd_server_event:service_disable(Service2);
+				true ->
+					redis_sd_server_event:service_enable(Service2)
+			end,
 			Backoff = backoff:init(timer:seconds(MinWait), timer:seconds(MaxWait), self(), connect),
 			BRef = start_connect(initial),
 			{ok, Service2?REDIS_SD_SERVICE{backoff=Backoff, bref=BRef}};
@@ -60,6 +73,22 @@ handle_call(Request, _From, Service) ->
 	{reply, ignore, Service}.
 
 %% @private
+handle_cast(enable, Service=?REDIS_SD_SERVICE{enabled=false, name=Name, redis_cli=Client}) ->
+	true = redis_sd_server:set_enabled(Name, true),
+	case Client of
+		undefined ->
+			{noreply, Service?REDIS_SD_SERVICE{enabled=true}};
+		_ ->
+			ok = stop_announce(Service),
+			announce(Service?REDIS_SD_SERVICE{enabled=true})
+	end;
+handle_cast(enable, Service=?REDIS_SD_SERVICE{enabled=true}) ->
+	{noreply, Service};
+handle_cast(disable, Service=?REDIS_SD_SERVICE{enabled=true, name=Name}) ->
+	true = redis_sd_server:set_enabled(Name, false),
+	{noreply, Service?REDIS_SD_SERVICE{enabled=false}};
+handle_cast(disable, Service=?REDIS_SD_SERVICE{enabled=false}) ->
+	{noreply, Service};
 handle_cast(Request, Service) ->
 	error_logger:warning_msg("[~p] Unhandled cast: ~p", [?MODULE, Request]),
 	{noreply, Service}.
@@ -92,8 +121,14 @@ terminate(normal, Service=?REDIS_SD_SERVICE{redis_cli=Client}) when Client =/= u
 	catch hierdis_async:close(Client),
 	redis_sd_server_event:service_terminate(normal, Service?REDIS_SD_SERVICE{redis_cli=undefined, ttl=0}),
 	ok;
-terminate(Reason, Service) ->
-	redis_sd_server_event:service_terminate(Reason, Service),
+terminate(Reason, Service=?REDIS_SD_SERVICE{redis_cli=Client}) ->
+	case Client of
+		undefined ->
+			ok;
+		_ ->
+			catch hierdis_async:close(Client)
+	end,
+	redis_sd_server_event:service_terminate(Reason, Service?REDIS_SD_SERVICE{redis_cli=undefined}),
 	ok.
 
 %% @private
@@ -114,8 +149,7 @@ connect(Service=?REDIS_SD_SERVICE{redis_opts={Transport, Args}, backoff=Backoff}
 	end,
 	case erlang:apply(hierdis_async, ConnectFun, Args) of
 		{ok, Client} ->
-			{_Start, Backoff2} = backoff:succeed(Backoff),
-			authorize(Service?REDIS_SD_SERVICE{redis_cli=Client, backoff=Backoff2});
+			authorize(Service?REDIS_SD_SERVICE{redis_cli=Client});
 		{error, _ConnectError} ->
 			BRef = start_connect(Service),
 			{_Delay, Backoff2} = backoff:fail(Backoff),
@@ -123,29 +157,39 @@ connect(Service=?REDIS_SD_SERVICE{redis_opts={Transport, Args}, backoff=Backoff}
 	end.
 
 %% @private
-authorize(Service=?REDIS_SD_SERVICE{redis_auth=undefined}) ->
+authorize(Service=?REDIS_SD_SERVICE{redis_auth=undefined, backoff=Backoff}) ->
 	redis_sd_server_event:service_connect(Service),
 	ARef = start_announce(initial),
-	{noreply, Service?REDIS_SD_SERVICE{aref=ARef}};
-authorize(Service=?REDIS_SD_SERVICE{redis_auth=Password}) when Password =/= undefined ->
+	{_Start, Backoff2} = backoff:succeed(Backoff),
+	{noreply, Service?REDIS_SD_SERVICE{aref=ARef, backoff=Backoff2}};
+authorize(Service=?REDIS_SD_SERVICE{redis_auth=Password, backoff=Backoff}) when Password =/= undefined ->
 	case redis_auth(Password, Service) of
 		ok ->
 			redis_sd_server_event:service_connect(Service),
 			ARef = start_announce(initial),
-			{noreply, Service?REDIS_SD_SERVICE{aref=ARef}};
+			{_Start, Backoff2} = backoff:succeed(Backoff),
+			{noreply, Service?REDIS_SD_SERVICE{aref=ARef, backoff=Backoff2}};
 		{error, AuthError} ->
-			{stop, {error, AuthError}, Service}
+			error_logger:warning_msg("[~p] Redis auth error: ~p", [AuthError]),
+			BRef = start_connect(Service),
+			{_Delay, Backoff2} = backoff:fail(Backoff),
+			{noreply, Service?REDIS_SD_SERVICE{backoff=Backoff2, bref=BRef}}
 	end.
 
 %% @private
 announce(Service) ->
 	try
 		case redis_sd_server_dns:refresh(Service) of
-			{ok, Data, Service2=#service{name=Name, obj=Obj}} ->
-				true = redis_sd_server:set_record(Name, Obj),
-				ok = redis_announce(Data, Service2),
+			{ok, Data, Service2=?REDIS_SD_SERVICE{name=Name, rec=Rec}} ->
+				true = redis_sd_server:set_record(Name, Rec),
+				case Service?REDIS_SD_SERVICE.enabled of
+					false ->
+						ok;
+					true ->
+						ok = redis_announce(Data, Service2)
+				end,
 				ARef = start_announce(Service2),
-				{next_state, announce, Service2#service{aref=ARef}};
+				{noreply, Service2?REDIS_SD_SERVICE{aref=ARef}};
 			RefreshError ->
 				erlang:error(RefreshError)
 		end
@@ -157,7 +201,7 @@ announce(Service) ->
 				"** Stacktrace: ~p~n~n",
 				[?MODULE, self(), announce, 2, Class, Reason, erlang:get_stacktrace()]),
 			ok = stop_announce(Service),
-			{stop, {Class, Reason}, Service#service{aref=undefined}}
+			{stop, {Class, Reason}, Service?REDIS_SD_SERVICE{aref=undefined}}
 	end.
 
 %%%-------------------------------------------------------------------
@@ -165,7 +209,7 @@ announce(Service) ->
 %%%-------------------------------------------------------------------
 
 %% @private
-redis_auth(Password, #service{redis_cli=Client, cmd_auth=AUTH}) ->
+redis_auth(Password, ?REDIS_SD_SERVICE{redis_cli=Client, cmd_auth=AUTH}) ->
 	Command = [AUTH, Password],
 	try hierdis_async:command(Client, Command) of
 		{ok, _} ->
@@ -182,7 +226,7 @@ redis_auth(Password, #service{redis_cli=Client, cmd_auth=AUTH}) ->
 	end.
 
 %% @private
-redis_announce(Data, Service=#service{key=KEY, obj=#dns_sd{ttl=TTL}, redis_cli=Client, redis_ns=Namespace, cmd_del=DEL, cmd_publish=PUBLISH, cmd_setex=SETEX}) ->
+redis_announce(Data, Service=?REDIS_SD_SERVICE{key=KEY, rec=?REDIS_SD_DNS{ttl=TTL}, redis_cli=Client, redis_ns=Namespace, cmd_del=DEL, cmd_publish=PUBLISH, cmd_setex=SETEX}) ->
 	redis_sd_server_event:service_announce(Data, Service),
 	Channel = [Namespace, "KEY:", KEY],
 	SetOrDel = case TTL of
@@ -213,34 +257,34 @@ redis_announce(Data, Service=#service{key=KEY, obj=#dns_sd{ttl=TTL}, redis_cli=C
 %% @private
 start_connect(initial) ->
 	start_connect(0);
-start_connect(Service=#service{backoff=Backoff}) ->
+start_connect(Service=?REDIS_SD_SERVICE{backoff=Backoff}) ->
 	ok = stop_connect(Service),
 	backoff:fire(Backoff);
 start_connect(N) when is_integer(N) ->
 	erlang:start_timer(N, self(), connect).
 
 %% @private
-stop_connect(#service{bref=undefined}) ->
+stop_connect(?REDIS_SD_SERVICE{bref=undefined}) ->
 	ok;
-stop_connect(#service{bref=BRef}) when is_reference(BRef) ->
+stop_connect(?REDIS_SD_SERVICE{bref=BRef}) when is_reference(BRef) ->
 	catch erlang:cancel_timer(BRef),
 	ok.
 
 %% @private
 start_announce(initial) ->
 	start_announce(crypto:rand_uniform(500, 1500));
-start_announce(Service=#service{obj=#dns_sd{ttl=0}}) ->
+start_announce(Service=?REDIS_SD_SERVICE{rec=?REDIS_SD_DNS{ttl=0}}) ->
 	ok = stop_announce(Service),
 	start_announce(0);
-start_announce(Service=#service{obj=#dns_sd{ttl=TTL}}) ->
+start_announce(Service=?REDIS_SD_SERVICE{rec=?REDIS_SD_DNS{ttl=TTL}}) ->
 	ok = stop_announce(Service),
 	start_announce(crypto:rand_uniform(TTL * 500, TTL * 900));
 start_announce(N) when is_integer(N) ->
 	erlang:start_timer(N, self(), announce).
 
 %% @private
-stop_announce(#service{aref=undefined}) ->
+stop_announce(?REDIS_SD_SERVICE{aref=undefined}) ->
 	ok;
-stop_announce(#service{aref=ARef}) when is_reference(ARef) ->
+stop_announce(?REDIS_SD_SERVICE{aref=ARef}) when is_reference(ARef) ->
 	catch erlang:cancel_timer(ARef),
 	ok.

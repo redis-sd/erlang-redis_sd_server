@@ -18,7 +18,9 @@
 
 %% API
 -export([manual_start/0, start_link/0]).
--export([new_service/1, rm_service/1, delete_service/1, get_record/1, set_pid/2, set_record/2]).
+-export([enable/0, enable/1, disable/0, disable/1, list/0, list_services/0]).
+-export([new_service/1, rm_service/1, delete_service/1, get_record/1,
+	set_enabled/2, set_pid/2, set_record/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -45,6 +47,49 @@ manual_start() ->
 start_link() ->
 	gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
+%% @doc Enables all services.
+enable() ->
+	enable([Pid || {_Name, Pid} <- list()]).
+
+%% @doc Enables the list of service names or pids.
+enable(Services) when is_list(Services) ->
+	_ = [redis_sd_server_service:enable(S) || S <- Services],
+	ok.
+
+%% @doc Disables all services.
+disable() ->
+	disable([Pid || {_Name, Pid} <- list()]).
+
+%% @doc Disables the list of service names or pids.
+disable(Services) when is_list(Services) ->
+	_ = [redis_sd_server_service:disable(S) || S <- Services],
+	ok.
+
+%% @doc List all service names and their pids.
+list() ->
+	ets:select(?TAB, [{{{pid, '$1'}, '$2'}, [], [{{'$1', '$2'}}]}]).
+
+%% @doc List all services in the format of: {Name, {Enabled, Pid, Record}}
+list_services() ->
+	FoldFun = fun
+		({{enabled, Name}, Enabled}, Acc) ->
+			UpdateFun = fun({_, Pid, Record}) ->
+				{Enabled, Pid, Record}
+			end,
+			orddict:update(Name, UpdateFun, {Enabled, undefined, undefined}, Acc);
+		({{pid, Name}, Pid}, Acc) ->
+			UpdateFun = fun({Enabled, _, Record}) ->
+				{Enabled, Pid, Record}
+			end,
+			orddict:update(Name, UpdateFun, {undefined, Pid, undefined}, Acc);
+		({{record, Name}, Record}, Acc) ->
+			UpdateFun = fun({Enabled, Pid, _}) ->
+				{Enabled, Pid, Record}
+			end,
+			orddict:update(Name, UpdateFun, {undefined, undefined, Record}, Acc)
+	end,
+	ets:foldl(FoldFun, orddict:new(), ?TAB).
+
 new_service(ServiceConfig) ->
 	redis_sd_server_sup:new_service(ServiceConfig).
 
@@ -65,19 +110,25 @@ get_record(ServiceName) ->
 	end.
 
 %% @private
+set_enabled(ServiceName, Enabled) ->
+	case is_service_owner(ServiceName) of
+		false ->
+			false;
+		true ->
+			gen_server:call(?SERVER, {set_enabled, ServiceName, Enabled})
+	end.
+
+%% @private
 set_pid(ServiceName, Pid) ->
 	gen_server:call(?SERVER, {set_pid, ServiceName, Pid}).
 
 %% @private
 set_record(ServiceName, Record) ->
-	try ets:lookup_element(?TAB, {pid, ServiceName}, 2) of
-		Pid when is_pid(Pid) andalso Pid =:= self() ->
-			gen_server:call(?SERVER, {set_record, ServiceName, Record});
-		_ ->
-			false
-	catch
-		_:_ ->
-			false
+	case is_service_owner(ServiceName) of
+		false ->
+			false;
+		true ->
+			gen_server:call(?SERVER, {set_record, ServiceName, Record})
 	end.
 
 %%%===================================================================
@@ -91,6 +142,9 @@ init([]) ->
 	{ok, #state{monitors=Monitors}}.
 
 %% @private
+handle_call({set_enabled, Ref, Enabled}, _From, State) ->
+	Reply = ets:insert(?TAB, {{enabled, Ref}, Enabled}),
+	{reply, Reply, State};
 handle_call({set_pid, Ref, Pid}, _From, State=#state{monitors=Monitors}) ->
 	case ets:insert_new(?TAB, {{pid, Ref}, Pid}) of
 		true ->
@@ -119,6 +173,7 @@ handle_info({'DOWN', MonitorRef, process, Pid, _Reason}, State=#state{monitors=M
 	case lists:keytake({MonitorRef, Pid}, 1, Monitors) of
 		{value, {{MonitorRef, Pid}, Ref}, Monitors2} ->
 			true = ets:delete(?TAB, {pid, Ref}),
+			true = ets:delete(?TAB, {enabled, Ref}),
 			true = ets:delete(?TAB, {record, Ref}),
 			{noreply, State#state{monitors=Monitors2}};
 		false ->
@@ -142,3 +197,16 @@ code_change(_OldVsn, State, _Extra) ->
 %%%-------------------------------------------------------------------
 %%% Internal functions
 %%%-------------------------------------------------------------------
+
+%% @private
+is_service_owner(ServiceName) ->
+	Self = self(),
+	try ets:lookup_element(?TAB, {pid, ServiceName}, 2) of
+		Self ->
+			true;
+		_ ->
+			false
+	catch
+		_:_ ->
+			false
+	end.

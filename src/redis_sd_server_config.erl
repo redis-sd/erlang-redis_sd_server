@@ -23,10 +23,21 @@
 %%% API functions
 %%%===================================================================
 
--spec list_to_service([{atom(), term()}]) -> service().
+-spec list_to_service([{atom(), term()}]) -> redis_sd_service().
 list_to_service(S) ->
-	Default = #service{},
-	#service{
+	Default = ?REDIS_SD_SERVICE{},
+	Enabled = opt(enabled, S, Default?REDIS_SD_SERVICE.enabled),
+	case Enabled of
+		false ->
+			ok;
+		true ->
+			ok;
+		BadBoolean ->
+			erlang:error({invalid_enabled_boolean, {enabled, BadBoolean}, S})
+	end,
+	?REDIS_SD_SERVICE{
+		enabled = Enabled,
+
 		name     = req(name, S),
 		domain   = req(domain, S),
 		type     = req(type, S),
@@ -41,22 +52,22 @@ list_to_service(S) ->
 		target   = req(target, S),
 
 		%% TXT
-		txtdata = opt(txtdata, S, Default#service.txtdata),
+		txtdata = opt(txtdata, S, Default?REDIS_SD_SERVICE.txtdata),
 
 		%% Redis Options
-		redis_opts = opt(redis_opts, S, Default#service.redis_opts),
-		redis_auth = opt(redis_auth, S, Default#service.redis_auth),
-		redis_ns   = opt(redis_ns, S, Default#service.redis_ns),
+		redis_opts = opt(redis_opts, S, Default?REDIS_SD_SERVICE.redis_opts),
+		redis_auth = opt(redis_auth, S, Default?REDIS_SD_SERVICE.redis_auth),
+		redis_ns   = opt(redis_ns, S, Default?REDIS_SD_SERVICE.redis_ns),
 
 		%% Redis Commands
-		cmd_auth    = opt(cmd_auth, S, Default#service.cmd_auth),
-		cmd_del     = opt(cmd_del, S, Default#service.cmd_del),
-		cmd_publish = opt(cmd_publish, S, Default#service.cmd_publish),
-		cmd_setex   = opt(cmd_setex, S, Default#service.cmd_setex),
+		cmd_auth    = opt(cmd_auth, S, Default?REDIS_SD_SERVICE.cmd_auth),
+		cmd_del     = opt(cmd_del, S, Default?REDIS_SD_SERVICE.cmd_del),
+		cmd_publish = opt(cmd_publish, S, Default?REDIS_SD_SERVICE.cmd_publish),
+		cmd_setex   = opt(cmd_setex, S, Default?REDIS_SD_SERVICE.cmd_setex),
 
 		%% Reconnect Options
-		min_wait = opt(min_wait, S, Default#service.min_wait),
-		max_wait = opt(max_wait, S, Default#service.max_wait)
+		min_wait = opt(min_wait, S, Default?REDIS_SD_SERVICE.min_wait),
+		max_wait = opt(max_wait, S, Default?REDIS_SD_SERVICE.max_wait)
 	}.
 
 %%%-------------------------------------------------------------------

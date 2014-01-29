@@ -9,7 +9,8 @@
 	{applications, [
 		kernel,
 		stdlib,
-		hierdis
+		hierdis,
+		redis_sd_spec
 	]},
 	{mod, {redis_sd_server_app, []}},
 	{env, []}
