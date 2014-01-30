@@ -3,12 +3,13 @@
 
 {application, redis_sd_server, [
 	{description, "Redis Service Discovery Server."},
-	{vsn, "0.1.1"},
+	{vsn, "0.2.0"},
 	{modules, []},
 	{registered, []},
 	{applications, [
 		kernel,
 		stdlib,
+		backoff,
 		hierdis,
 		redis_sd_spec
 	]},

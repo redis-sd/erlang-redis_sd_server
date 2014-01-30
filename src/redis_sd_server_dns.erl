@@ -105,7 +105,7 @@ setval(target, S=?REDIS_SD_SERVICE{target=V, rec=Rec}) ->
 	V2 = redis_sd:any_to_binary(val(Rec, V)),
 	S?REDIS_SD_SERVICE{rec=Rec?REDIS_SD_DNS{target=V2}};
 setval(txtdata, S=?REDIS_SD_SERVICE{txtdata=TXTData, rec=Rec}) ->
-	V2 = [{val(Rec, K), val(Rec, V)} || {K, V} <- val(Rec, TXTData)],
+	V2 = [{redis_sd:any_to_binary(val(Rec, K)), redis_sd:any_to_binary(val(Rec, V))} || {K, V} <- val(Rec, TXTData)],
 	S?REDIS_SD_SERVICE{rec=Rec?REDIS_SD_DNS{txtdata=V2}};
 setval(keys, S=?REDIS_SD_SERVICE{rec=?REDIS_SD_DNS{domain=Domain, type=Type, service=Service, instance=Instance}}) ->
 	Keys = redis_sd:labels_to_keys({Domain, Type, Service, Instance}),

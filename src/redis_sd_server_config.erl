@@ -13,7 +13,7 @@
 -include("redis_sd_server.hrl").
 
 %% API
--export([list_to_service/1]).
+-export([list_to_service/1, list_to_service/2]).
 
 %% Internal
 -export([opt/2, opt/3, req/2]).
@@ -24,8 +24,25 @@
 %%%===================================================================
 
 -spec list_to_service([{atom(), term()}]) -> redis_sd_service().
-list_to_service(S) ->
+list_to_service(ServiceConfig) ->
+	list_to_service([], ServiceConfig).
+
+-spec list_to_service([module()], [{atom(), term()}]) -> redis_sd_service().
+list_to_service(Apps, ServiceConfig) when is_list(Apps) ->
 	Default = ?REDIS_SD_SERVICE{},
+	Defaults = [
+		{enabled, Default?REDIS_SD_SERVICE.enabled, app},
+		{redis_opts, Default?REDIS_SD_SERVICE.redis_opts, app},
+		{redis_auth, Default?REDIS_SD_SERVICE.redis_auth, app},
+		{redis_ns, Default?REDIS_SD_SERVICE.redis_ns, app},
+		{cmd_auth, Default?REDIS_SD_SERVICE.cmd_auth, app},
+		{cmd_del, Default?REDIS_SD_SERVICE.cmd_del, app},
+		{cmd_publish, Default?REDIS_SD_SERVICE.cmd_publish, app},
+		{cmd_setex, Default?REDIS_SD_SERVICE.cmd_setex, app},
+		{min_wait, Default?REDIS_SD_SERVICE.min_wait, app},
+		{max_wait, Default?REDIS_SD_SERVICE.max_wait, app}
+	],
+	S = redis_sd_config:merge(Apps ++ [redis_sd_server], Defaults, ServiceConfig),
 	Enabled = opt(enabled, S, Default?REDIS_SD_SERVICE.enabled),
 	case Enabled of
 		false ->
@@ -55,19 +72,19 @@ list_to_service(S) ->
 		txtdata = opt(txtdata, S, Default?REDIS_SD_SERVICE.txtdata),
 
 		%% Redis Options
-		redis_opts = opt(redis_opts, S, Default?REDIS_SD_SERVICE.redis_opts),
+		redis_opts = req(redis_opts, S),
 		redis_auth = opt(redis_auth, S, Default?REDIS_SD_SERVICE.redis_auth),
 		redis_ns   = opt(redis_ns, S, Default?REDIS_SD_SERVICE.redis_ns),
 
 		%% Redis Commands
-		cmd_auth    = opt(cmd_auth, S, Default?REDIS_SD_SERVICE.cmd_auth),
-		cmd_del     = opt(cmd_del, S, Default?REDIS_SD_SERVICE.cmd_del),
-		cmd_publish = opt(cmd_publish, S, Default?REDIS_SD_SERVICE.cmd_publish),
-		cmd_setex   = opt(cmd_setex, S, Default?REDIS_SD_SERVICE.cmd_setex),
+		cmd_auth    = req(cmd_auth, S),
+		cmd_del     = req(cmd_del, S),
+		cmd_publish = req(cmd_publish, S),
+		cmd_setex   = req(cmd_setex, S),
 
 		%% Reconnect Options
-		min_wait = opt(min_wait, S, Default?REDIS_SD_SERVICE.min_wait),
-		max_wait = opt(max_wait, S, Default?REDIS_SD_SERVICE.max_wait)
+		min_wait = req(min_wait, S),
+		max_wait = req(max_wait, S)
 	}.
 
 %%%-------------------------------------------------------------------
@@ -93,6 +110,8 @@ opt(Key, P, Default) ->
 req(Key, P) ->
 	case lists:keyfind(Key, 1, P) of
 		false ->
+			erlang:error({missing_required_config, Key, P});
+		{Key, undefined} ->
 			erlang:error({missing_required_config, Key, P});
 		{Key, Value} ->
 			Value

@@ -31,11 +31,12 @@ start_link() ->
 
 %% @doc Create a new service from proplist service config `ServiceConfig'. The
 %% public API for this functionality is {@link redis_sd_server:new_service/1}.
-new_service(ServiceConfig) ->
-	NewService = redis_sd_server_config:list_to_service(ServiceConfig),
-	case redis_sd_server_dns:resolve([service, type, domain], NewService) of
+new_service(ServiceConfig) when is_list(ServiceConfig) ->
+	new_service(redis_sd_server_config:list_to_service(ServiceConfig));
+new_service(Service=?REDIS_SD_SERVICE{}) ->
+	case redis_sd_server_dns:resolve([service, type, domain], Service) of
 		{ok, _} ->
-			Spec = service_sup_spec(NewService),
+			Spec = service_sup_spec(Service),
 			supervisor:start_child(?MODULE, Spec);
 		ResolveError ->
 			ResolveError
