@@ -3,7 +3,7 @@
 
 {application, redis_sd_server, [
 	{description, "Redis Service Discovery Server."},
-	{vsn, "0.1.0"},
+	{vsn, "0.1.1"},
 	{modules, []},
 	{registered, []},
 	{applications, [

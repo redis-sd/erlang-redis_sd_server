@@ -40,6 +40,7 @@
 manual_start() ->
 	redis_sd:require([
 		hierdis,
+		redis_sd_spec,
 		redis_sd_server
 	]).
 

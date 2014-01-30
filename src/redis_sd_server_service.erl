@@ -68,8 +68,11 @@ init(Service=?REDIS_SD_SERVICE{enabled=Enabled, name=Name, min_wait=MinWait, max
 %% @private
 handle_call(graceful_shutdown, _From, Service) ->
 	{stop, normal, ok, Service};
-handle_call(Request, _From, Service) ->
-	error_logger:warning_msg("[~p] Unhandled call: ~p", [?MODULE, Request]),
+handle_call(Request, From, Service=?REDIS_SD_SERVICE{name=Name}) ->
+	error_logger:warning_msg(
+		"** ~p ~p unhandled request from ~p in ~p/~p~n"
+		"   Request was: ~p~n",
+		[?MODULE, Name, From, handle_call, 3, Request]),
 	{reply, ignore, Service}.
 
 %% @private
@@ -89,8 +92,11 @@ handle_cast(disable, Service=?REDIS_SD_SERVICE{enabled=true, name=Name}) ->
 	{noreply, Service?REDIS_SD_SERVICE{enabled=false}};
 handle_cast(disable, Service=?REDIS_SD_SERVICE{enabled=false}) ->
 	{noreply, Service};
-handle_cast(Request, Service) ->
-	error_logger:warning_msg("[~p] Unhandled cast: ~p", [?MODULE, Request]),
+handle_cast(Request, Service=?REDIS_SD_SERVICE{name=Name}) ->
+	error_logger:warning_msg(
+		"** ~p ~p unhandled request in ~p/~p~n"
+		"   Request was: ~p~n",
+		[?MODULE, Name, handle_cast, 2, Request]),
 	{noreply, Service}.
 
 %% @private
@@ -170,7 +176,7 @@ authorize(Service=?REDIS_SD_SERVICE{redis_auth=Password, backoff=Backoff}) when 
 			{_Start, Backoff2} = backoff:succeed(Backoff),
 			{noreply, Service?REDIS_SD_SERVICE{aref=ARef, backoff=Backoff2}};
 		{error, AuthError} ->
-			error_logger:warning_msg("[~p] Redis auth error: ~p", [AuthError]),
+			error_logger:warning_msg("[~p] Redis auth error: ~p", [?MODULE, AuthError]),
 			BRef = start_connect(Service),
 			{_Delay, Backoff2} = backoff:fail(Backoff),
 			{noreply, Service?REDIS_SD_SERVICE{backoff=Backoff2, bref=BRef}}
